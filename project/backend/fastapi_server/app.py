@@ -1,12 +1,12 @@
 from fastapi import FastAPI
 
-from fastapi_server.routers import analysis, candles, performance, tasks
+from fastapi_server.routers import analysis, candles, performance
 
 app = FastAPI(
     title="Investor API",
     description=(
         "Свечи, аналитика и бэктест сигналов из investor "
-        "(TTL-кэш на стороне backend) и учебный CRUD задач"
+        "(TTL-кэш на стороне backend)"
     ),
     version="0.1.0",
 )
@@ -14,7 +14,6 @@ app = FastAPI(
 app.include_router(candles.router)
 app.include_router(analysis.router)
 app.include_router(performance.router)
-app.include_router(tasks.router)
 
 
 @app.get("/")

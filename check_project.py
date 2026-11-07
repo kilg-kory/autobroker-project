@@ -214,18 +214,16 @@ def check_fastapi() -> None:
 
     try:
         step("GET /", client.get("/"), 200)
-        created = step("POST /tasks/create", client.post(
-            "/tasks/create", json={"title": "t1"}), 200).json()
-        task_id = created["task"]["id"]
-        step("GET task", client.get(f"/tasks/task/{task_id}"), 200)
-        step("GET list", client.get("/tasks/list?skip=0&limit=10"), 200)
-        step("PUT task", client.put(
-            f"/tasks/task/{task_id}", json={"title": "t2"}), 200)
-        step("PUT missing", client.put(
-            "/tasks/task/999", json={"title": "x"}), 404)
-        step("DELETE task", client.delete(f"/tasks/task/{task_id}"), 200)
-        step("DELETE again", client.delete(f"/tasks/task/{task_id}"), 404)
-        ok("fastapi endpoints")
+
+        # контракт API: только боевые роутеры, учебного CRUD задач больше нет
+        spec = step("GET /openapi.json", client.get("/openapi.json"), 200).json()
+        expected = {"/candles", "/analysis", "/performance"}
+        missing = expected - set(spec["paths"])
+        if missing:
+            raise AssertionError(f"нет эндпоинтов: {sorted(missing)}")
+        step("GET /tasks/list (удалён)", client.get("/tasks/list"), 404)
+
+        ok("fastapi endpoints", f" {sorted(spec['paths'])}")
     except Exception as exc:  # noqa: BLE001
         fail("fastapi endpoints", exc)
 

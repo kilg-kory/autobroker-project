@@ -47,7 +47,6 @@ FastAPI-сервис: отдаёт свечи и аналитику, получ�
 | GET | `/candles/cache/stats` | ttl, размер кэша, hits, misses |
 | GET | `/analysis/cache/stats` | то же для кэша аналитики |
 | GET | `/performance/cache/stats` | то же для кэша бэктеста |
-| GET | `/tasks` и далее | учебный in-memory CRUD |
 
 `GET /candles?instrument_id=BBG004730N88&interval=CANDLE_INTERVAL_HOUR&days=30`
 
@@ -132,15 +131,18 @@ hit ratio, profit factor, risk/reward, число сделок. `patterns` — i
 fastapi_server/
   app.py                 FastAPI + подключение роутеров
   config.py              настройки из окружения
-  models.py              pydantic-схемы: Task, Quotation, HistoricCandle,
+  models.py              pydantic-схемы: Quotation, HistoricCandle,
                          AnalysisResponse, PerformanceResponse
   cache.py               TTLCache: get/set/stats, без зависимостей
   investor_client.py     httpx-клиент сервиса investor (/candles, /analysis, /performance)
   routers/candles.py     GET /candles + кэширование
   routers/analysis.py    GET /analysis + кэширование
   routers/performance.py GET /performance + кэширование
-  routers/tasks.py       учебный CRUD в памяти
 ```
+
+Учебный CRUD задач (`/tasks` на in-memory списке) убран из API — сервис не
+должен отдавать эндпоинты, которых нет в продукте. Файл лежит в
+`learning/backend_legacy/tasks.py`.
 
 Backend **не импортирует** investor: знает только URL и JSON-контракт
 (`HistoricCandle`). Поэтому сервисы можно разнести по контейнерам и машинам,

@@ -3,16 +3,6 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-# sqlalchemy models
-
-
-# pydantic schemas
-
-class Task(BaseModel):
-    title: str
-    description: str | None = None  # Необязательное поле, по умолчанию None
-    is_completed: bool = False      # По умолчанию задача не выполнена
-
 
 class Quotation(BaseModel):
     """Деньги в T-Invest API: units + nano (10^-9)."""
