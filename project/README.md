@@ -19,6 +19,7 @@ frontend ──GET /api/candles─────▶ backend ──HTTP──▶ in
 - **backend** — REST для фронтенда, кэширует ответы investor на 5 секунд.
   Знает про investor только `INVESTOR_API_URL`.
 - **frontend** — React + MUI + RTK Query, проксирует `/api` на backend.
+тестовое зименени
 
 Никто не импортирует код соседа — только сетевые вызовы и SQL к своей базе.
 Поэтому сервисы разъезжаются по контейнерам и машинам без правок кода.
