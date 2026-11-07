@@ -29,6 +29,10 @@ logger = logging.getLogger("investor.service")
 REFRESH_INTERVAL_SECONDS = float(os.getenv("REFRESH_INTERVAL_SECONDS", "30"))
 WARMUP_DAYS = int(os.getenv("WARMUP_DAYS", "30"))
 
+# Сколько ждать первого наполнения ключа, который запросили впервые. Ждём
+# фоновый цикл (он просыпается сразу при регистрации ключа), а не идём в API.
+FIRST_FILL_WAIT_SECONDS = float(os.getenv("FIRST_FILL_WAIT_SECONDS", "15"))
+
 Key = tuple[str, str, int]
 
 
@@ -82,6 +86,17 @@ def plan_missing(
 
 @dataclass
 class Store:
+    """Чтение из БД + фоновое наполнение из источника.
+
+    Разделение намеренное: HTTP-запросы только читают PostgreSQL, а в T-Invest
+    ходит единственный фоновый цикл. Так один клиент не может спровоцировать
+    вызовы биржевого API, а нагрузка на источник не зависит от числа фронтендов.
+
+    Новый ключ (другой инструмент или глубина) регистрируется при первом
+    запросе, будит цикл через `_wake` и ждёт первого наполнения — но ждёт именно
+    цикл, а не делает собственный запрос.
+    """
+
     storage: CandleStorage
     keys: set[Key] = field(default_factory=set)
     refreshes: int = 0
@@ -89,10 +104,43 @@ class Store:
     last_error: str | None = None
     last_fetched: int = 0
     last_source: str = "-"
+    #: чем наполнен ключ: tinvest, mock или error (пустой — ещё не наполняли)
+    sources: dict[Key, str] = field(default_factory=dict)
+    _wake: asyncio.Event = field(default_factory=asyncio.Event)
+    _filled: dict[Key, asyncio.Event] = field(default_factory=dict)
+
+    def register(self, key: Key) -> asyncio.Event:
+        """Добавляет ключ к фоновому обновлению и возвращает его «готовность»."""
+        self._filled.setdefault(key, asyncio.Event())
+        if key not in self.keys:
+            self.keys.add(key)
+            self._wake.set()  # новый ключ — пусть цикл не ждёт следующего тика
+        return self._filled[key]
 
     async def get(self, key: Key) -> tuple[list[dict[str, Any]], str]:
-        """Свечи за окно ключа. Возвращает данные и то, откуда они взялись."""
-        self.keys.add(key)
+        """Свечи за окно ключа — только из БД. В источник не ходим никогда."""
+        filled = self.register(key)
+        if key not in self.sources:
+            # ключ видит впервые: даём циклу шанс наполнить его прямо сейчас
+            try:
+                await asyncio.wait_for(filled.wait(), timeout=FIRST_FILL_WAIT_SECONDS)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "%s/%s: данных ещё нет, фоновый цикл не успел за %.0f с",
+                    key[0],
+                    key[1],
+                    FIRST_FILL_WAIT_SECONDS,
+                )
+
+        from_, to = window(key)
+        candles = await asyncio.to_thread(self.storage.load, key, from_, to)
+        return candles, "postgres"
+
+    async def refresh_key(self, key: Key) -> None:
+        """Докачка недостающего и запись в БД — вызывается только циклом."""
+        # ключи прогрева не проходили через register(), поэтому событие готовности
+        # создаём здесь же, а не полагаемся на словарь
+        filled = self._filled.setdefault(key, asyncio.Event())
         from_, to = window(key)
         step = step_for(key[1])
 
@@ -104,33 +152,35 @@ class Store:
 
         for start, end in ranges:
             try:
-                result = await asyncio.to_thread(
-                    fetch_range, key[0], key[1], start, end
-                )
+                result = await asyncio.to_thread(fetch_range, key[0], key[1], start, end)
             except Exception as exc:  # noqa: BLE001
                 self.errors += 1
                 self.last_error = f"{type(exc).__name__}: {exc}"
-                logger.warning("источник недоступен (%s), отдаём то, что в БД", exc)
+                logger.warning("источник недоступен (%s), остаёмся на том, что в БД", exc)
+                sources.add("error")
                 continue
 
             sources.add(result.source)
             if result.candles:
                 fetched += await asyncio.to_thread(self.storage.upsert, key, result.candles)
 
-        candles = await asyncio.to_thread(self.storage.load, key, from_, to)
-
-        self.refreshes += 1
-        self.last_fetched = fetched
-        # "error" — источник не ответил; данные всё равно взяты из базы
+        # "error" — источник не ответил; данные в базе всё равно есть
         sources.discard("error")
         source = (
             "postgres"
             if not sources
             else ("mixed" if len(sources) > 1 else next(iter(sources)))
         )
+
+        self.refreshes += 1
+        self.last_fetched = fetched
         self.last_source = source
+        self.sources[key] = source
+        filled.set()
+
+        candles = await asyncio.to_thread(self.storage.load, key, from_, to)
         logger.info(
-            "%s/%s: в БД %d свечей, докачано %d за %d диапазон(ов), ответ: %s",
+            "%s/%s: в БД %d свечей, докачано %d за %d диапазон(ов), источник: %s",
             key[0],
             key[1],
             len(candles),
@@ -138,30 +188,39 @@ class Store:
             len(ranges),
             source,
         )
-        return candles, source
 
     async def refresh_all(self) -> None:
         for key in sorted(self.keys | set(WARMUP_KEYS)):
             try:
-                await self.get(key)
+                await self.refresh_key(key)
             except Exception as exc:  # noqa: BLE001 - один сбой не должен ронять сервис
                 self.errors += 1
                 self.last_error = f"{type(exc).__name__}: {exc}"
                 logger.warning("не удалось обновить %s: %s", key, exc)
 
     async def run_refresher(self) -> None:
-        logger.info("фоновое обновление каждые %.0f с", REFRESH_INTERVAL_SECONDS)
+        """Единственный потребитель биржевого API."""
+        logger.info(
+            "фоновое обновление: каждые %.0f с или сразу после появления нового ключа",
+            REFRESH_INTERVAL_SECONDS,
+        )
         while True:
-            await asyncio.sleep(REFRESH_INTERVAL_SECONDS)
+            try:
+                await asyncio.wait_for(self._wake.wait(), timeout=REFRESH_INTERVAL_SECONDS)
+            except asyncio.TimeoutError:
+                pass
+            self._wake.clear()
             await self.refresh_all()
 
     async def health(self) -> dict[str, Any]:
         snapshots = {}
         for key in sorted(self.keys | set(WARMUP_KEYS)):
+            name = f"{key[0]}/{key[1]}/{key[2]}"
             try:
-                snapshots[f"{key[0]}/{key[1]}/{key[2]}"] = await asyncio.to_thread(
-                    self.storage.stats, key
-                )
+                snapshots[name] = {
+                    "source": self.sources.get(key, "не наполнялся"),
+                    **(await asyncio.to_thread(self.storage.stats, key)),
+                }
             except Exception as exc:  # noqa: BLE001
-                snapshots[f"{key[0]}/{key[1]}/{key[2]}"] = {"error": str(exc)}
+                snapshots[name] = {"error": str(exc)}
         return snapshots

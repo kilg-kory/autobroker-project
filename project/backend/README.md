@@ -63,7 +63,7 @@ FastAPI-сервис: отдаёт свечи и аналитику, получ�
 |---|---|
 | `X-Cache` | `MISS` — сходили в investor; `HIT` — отдали из кэша |
 | `X-Cache-TTL` | TTL в секундах (сейчас 5) |
-| `X-Data-Source` | проброшен от investor: `tinvest`, `postgres` или `mock` |
+| `X-Data-Source` | проброшен от investor: теперь всегда `postgres` — запрос читает базу |
 | `X-Signals-Count` | только `/analysis`: сколько отметок паттернов в ответе |
 
 ### `/analysis`

@@ -11,10 +11,11 @@ frontend ──GET /api/candles─────▶ backend ──HTTP──▶ in
 ```
 
 - **investor** — самостоятельный сервис. Свечи лежат в PostgreSQL, у T-Invest
-  докачиваются только недостающие интервалы. Фоновое обновление идёт по
-  расписанию и не зависит от того, подключён ли кто-то. Здесь же считается
-  аналитика: индикаторы (SMA/EMA/RSI/ATR), сигналы 27 паттернов из `signals/`
-  и их бэктест (hit ratio, profit factor, risk/reward).
+  докачиваются только недостающие интервалы. В биржевой API ходит **только
+  фоновый цикл**: HTTP-обработчики читают свою базу, поэтому запрос клиента не
+  вызывает вызовов T-Invest, а обновление не зависит от того, подключён ли
+  кто-то. Здесь же считается аналитика: индикаторы (SMA/EMA/RSI/ATR), сигналы
+  27 паттернов из `signals/` и их бэктест (hit ratio, profit factor, risk/reward).
 - **backend** — REST для фронтенда, кэширует ответы investor на 5 секунд.
   Знает про investor только `INVESTOR_API_URL`.
 - **frontend** — React + MUI + RTK Query, проксирует `/api` на backend.
@@ -151,7 +152,7 @@ Dockerfile ставит его оттуда как **дополнительны�
 
 | Заголовок | Кто отдаёт | Смысл |
 |---|---|---|
-| `X-Data-Source` | investor → backend | `tinvest`, `postgres` или `mock` |
+| `X-Data-Source` | investor → backend | `postgres` — запрос читает базу; в API ходит только фоновый цикл |
 | `X-Candles-Count` | investor | сколько свечей в ответе |
 | `X-Signals-Count` | investor → backend | сколько отметок паттернов в `/analysis` |
 | `X-Cache` | backend | `HIT` / `MISS` |

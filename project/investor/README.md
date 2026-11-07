@@ -27,7 +27,7 @@
 ```
 market/candles.py        источник: T-Invest API (таймаут на вызов — TINVEST_TIMEOUT_SECONDS), мок только без токена
 service/storage.py       PostgreSQL: таблица candles, upsert, выборка по окну
-service/store.py         план докачки + фоновый цикл обновления
+service/store.py         чтение из БД + план докачки, который исполняет фоновый цикл
 service/analysis.py      индикаторы и разметка сигналов по свечам
 service/performance.py   бэктест сигналов: hit ratio, profit factor, risk/reward
 service/app.py           FastAPI: /candles, /analysis, /performance, /health
@@ -39,10 +39,23 @@ util/data_utils.py       матричные хелперы для signals/
 `performance.py`) перенесены в `learning/investor_book/` — сервис их не
 импортирует.
 
+### В T-Invest ходит только фоновый цикл
+
+Разделение жёсткое: HTTP-обработчики (`/candles`, `/analysis`, `/performance`)
+читают **только** PostgreSQL, а биржевой API трогает единственный фоновый цикл
+(`store.run_refresher`). Один клиент не может спровоцировать вызовы T-Invest, а
+нагрузка на источник не зависит от числа фронтендов.
+
+Цикл просыпается раз в `REFRESH_INTERVAL_SECONDS` (30 с) **или сразу**, когда
+появился новый ключ — например, фронтенд впервые запросил другой инструмент или
+другую глубину. Новый ключ при этом ждёт первого наполнения не дольше
+`FIRST_FILL_WAIT_SECONDS` и получает данные из базы: если цикл не успел,
+ответ будет пустым, но вызова к бирже из запроса не случится.
+
 ### Докачка только недостающего
 
-Клиент просит окно `[to - days, to]`. В базе известно `[min, max]`, поэтому
-у источника запрашиваются только два куска:
+План считается по границам сохранённого. Для окна `[to - days, to]` в базе
+известно `[min, max]`, поэтому у источника запрашиваются только два куска:
 
 ```
 [from_ ................. to]
@@ -61,8 +74,12 @@ util/data_utils.py       матричные хелперы для signals/
 перезапуска контейнера:
 
 ```
-BBG004730N88/CANDLE_INTERVAL_HOUR: в БД 575 свечей, докачано 1 за 1 диапазон(ов), ответ: tinvest
+BBG004730N88/CANDLE_INTERVAL_HOUR: в БД 575 свечей, докачано 1 за 1 диапазон(ов), источник: tinvest
 ```
+
+Откуда в базе данные — видно в `/health` (поле `source` по каждому ключу:
+`tinvest`, `mock`, `mixed`). В ответе `/candles` заголовок `X-Data-Source`
+всегда `postgres`: с точки зрения запроса данные пришли из базы, а не из API.
 
 ### Таблица `candles`
 
@@ -84,7 +101,8 @@ BBG004730N88/CANDLE_INTERVAL_HOUR: в БД 575 свечей, докачано 1 
 | Переменная | По умолчанию | Зачем |
 |---|---|---|
 | `DATABASE_URL` | — (обязательна) | строка подключения к PostgreSQL |
-| `REFRESH_INTERVAL_SECONDS` | `30` | период фонового обновления |
+| `REFRESH_INTERVAL_SECONDS` | `30` | период фонового обновления (плюс внеплановый проход при новом ключе) |
+| `FIRST_FILL_WAIT_SECONDS` | `15` | сколько запрос ждёт первого наполнения нового ключа |
 | `WARMUP_INSTRUMENTS` | `BBG004730N88` | что прогреть на старте (через запятую) |
 | `WARMUP_INTERVALS` | `CANDLE_INTERVAL_HOUR` | интервалы прогрева |
 | `WARMUP_DAYS` | `30` | глубина прогрева |
@@ -99,8 +117,9 @@ BBG004730N88/CANDLE_INTERVAL_HOUR: в БД 575 свечей, докачано 1 
 `GET /candles?instrument_id=BBG004730N88&interval=CANDLE_INTERVAL_HOUR&days=30`
 
 Ответ — массив `HistoricCandle`: цены как `Quotation { units, nano }`, время ISO 8601,
-флаг `isComplete`. Заголовки: `X-Data-Source` (`tinvest` | `postgres` | `mock`),
-`X-Candles-Count`.
+флаг `isComplete`. Заголовки: `X-Data-Source` (всегда `postgres` — запрос читает
+базу), `X-Candles-Count`. Происхождение данных в базе (`tinvest` | `mock` |
+`mixed`) отдаёт `/health`.
 
 `GET /health` — `{status, refresh_interval_seconds, refreshes, errors, last_error,
 last_fetched, last_source, keys, snapshots}`.
