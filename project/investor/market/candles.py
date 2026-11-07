@@ -22,8 +22,6 @@ import logging
 import math
 import os
 import random
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -50,7 +48,12 @@ if _ENV_FILE is not None:
 
 DEFAULT_INSTRUMENT = "BBG004730N88"  # Сбербанк, как в tryTAPI.ipynb
 NANO = 1_000_000_000
-FETCH_TIMEOUT_SECONDS = 10
+
+# Таймаут одного gRPC-вызова к T-Invest. Ставится интерсептором SDK на сам
+# вызов, поэтому SDK действительно прерывает запрос по deadline.
+# Значение большое намеренно: история за длинный период выкачивается страницами,
+# и каждая страница — отдельный unary-вызов, который может идти долго.
+TINVEST_TIMEOUT_SECONDS = float(os.getenv("TINVEST_TIMEOUT_SECONDS", "120"))
 MAX_CANDLES = 5_000
 
 STEP_BY_INTERVAL = {
@@ -91,6 +94,10 @@ def fetch_range(
     Если токен есть, но API ответил ошибкой — возвращаем пустой результат:
     подставлять синтетику в реальные данные нельзя, а то, что уже в базе,
     сервис отдаст и так.
+
+    Таймаут живёт в интерсепторе клиента SDK (`TINVEST_TIMEOUT_SECONDS`),
+    а не вокруг вызова: gRPC по deadline сам отменяет запрос, поэтому
+    зависший вызов не держит ни поток, ни HTTP-запрос.
     """
     token = os.getenv("TOKEN")
     if not token:
@@ -98,14 +105,11 @@ def fetch_range(
         return CandlesResult(_mock_range(interval, from_, to), "mock")
 
     try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_from_tinvest, token, instrument_id, interval, from_, to)
-            candles = future.result(timeout=FETCH_TIMEOUT_SECONDS)
-    except FutureTimeout:
-        logger.warning("investor: T-Invest не ответил за %d с", FETCH_TIMEOUT_SECONDS)
-        return CandlesResult([], "error")
+        candles = _from_tinvest(token, instrument_id, interval, from_, to)
     except Exception as exc:  # noqa: BLE001 - ошибка API не должна ломать выдачу
-        logger.warning("investor: T-Invest недоступен (%s: %s)", type(exc).__name__, exc)
+        logger.warning(
+            "investor: T-Invest недоступен (%s: %s)", type(exc).__name__, exc
+        )
         return CandlesResult([], "error")
 
     logger.info(
@@ -125,11 +129,21 @@ def _from_tinvest(
     to: datetime,
 ) -> list[dict[str, Any]]:
     from t_tech.invest import CandleInterval, Client
+    from t_tech.invest.grpc.utils.interceptors import DefaultTimeoutInterceptor
     from t_tech.invest.schemas import CandleSource
 
     interval_enum = getattr(CandleInterval, interval, CandleInterval.CANDLE_INTERVAL_HOUR)
 
-    with Client(token) as client:
+    # Штатный интерсептор SDK: проставляет deadline каждому unary-вызову.
+    # Альтернатива — свой ThreadPoolExecutor с future.result(timeout=...), но
+    # она не работает: выход из `with ThreadPoolExecutor(...)` ждёт поток, и
+    # зависший вызов всё равно держит запрос до конца.
+    timeout = DefaultTimeoutInterceptor(
+        unary_timeout=TINVEST_TIMEOUT_SECONDS,
+        stream_timeout=None,  # стримов у нас нет
+    )
+
+    with Client(token, interceptors=[timeout]) as client:
         raw = client.get_all_candles(
             instrument_id=instrument_id,
             from_=from_,

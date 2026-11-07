@@ -35,6 +35,9 @@ services:
     environment:
       DATABASE_URL: "postgresql://investor:investor@postgres:5432/investor"
       REFRESH_INTERVAL_SECONDS: "30"
+      # таймаут одного gRPC-вызова к T-Invest; история выкачивается страницами,
+      # поэтому значение большое — по умолчанию 120 с
+      TINVEST_TIMEOUT_SECONDS: "120"
       WARMUP_INSTRUMENTS: "BBG004730N88"
       WARMUP_INTERVALS: "CANDLE_INTERVAL_HOUR"
       WARMUP_DAYS: "30"

@@ -25,7 +25,7 @@
 ## Как устроено
 
 ```
-market/candles.py        источник: T-Invest API (таймаут 10 с), мок только без токена
+market/candles.py        источник: T-Invest API (таймаут на вызов — TINVEST_TIMEOUT_SECONDS), мок только без токена
 service/storage.py       PostgreSQL: таблица candles, upsert, выборка по окну
 service/store.py         план докачки + фоновый цикл обновления
 service/analysis.py      индикаторы и разметка сигналов по свечам
@@ -89,6 +89,7 @@ BBG004730N88/CANDLE_INTERVAL_HOUR: в БД 575 свечей, докачано 1 
 | `WARMUP_INTERVALS` | `CANDLE_INTERVAL_HOUR` | интервалы прогрева |
 | `WARMUP_DAYS` | `30` | глубина прогрева |
 | `TOKEN` | — | токен T-Invest; без него сервис отдаёт мок |
+| `TINVEST_TIMEOUT_SECONDS` | `120` | таймаут одного gRPC-вызова к T-Invest (внутри SDK, по deadline) |
 
 Токен берётся из окружения (в compose — из корневого `.env`) либо из ближайшего
 `.env` вверх по дереву при локальном запуске.
