@@ -1,0 +1,85 @@
+# Три независимых сервиса.
+# backend знает про investor только URL (INVESTOR_API_URL), investor — про
+# Postgres только строку подключения. Любой из них можно унести на другую машину,
+# поменяв одну переменную окружения.
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: investor
+      POSTGRES_USER: investor
+      POSTGRES_PASSWORD: investor
+    volumes:
+      # каталог в корне репозитория (рядом с project/), а не внутри сервисов:
+      # данные переживают перезапуски и `docker compose down`, их видно и легко
+      # забэкапить, а каталог с кодом остаётся без состояния
+      - ../data/postgres:/var/lib/postgresql/data
+    ports:
+      # на хосте 5433, чтобы не конфликтовать с локальным Postgres на 5432
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U investor -d investor"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  investor:
+    build: ./investor
+    restart: unless-stopped
+    env_file:
+      - ../.env          # TOKEN для T-Invest API
+    environment:
+      DATABASE_URL: "postgresql://investor:investor@postgres:5432/investor"
+      REFRESH_INTERVAL_SECONDS: "30"
+      WARMUP_INSTRUMENTS: "BBG004730N88"
+      WARMUP_INTERVALS: "CANDLE_INTERVAL_HOUR"
+      WARMUP_DAYS: "30"
+    ports:
+      - "8100:8100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8100/health').status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      INVESTOR_API_URL: "http://investor:8100"
+      CACHE_TTL_SECONDS: "5"
+    ports:
+      - "8000:8000"
+    depends_on:
+      investor:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    environment:
+      # nginx проксирует /api на этот адрес (можно указать другой хост)
+      BACKEND_URL: "http://backend:8000"
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 10s

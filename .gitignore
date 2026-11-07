@@ -1,0 +1,48 @@
+# --- Секреты ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Окружения и кэш Python ---
+.venv/
+.venv*/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+.ipython/
+
+# --- IDE и локальные инструменты ---
+.vscode/
+.spyproject/
+.idea/
+.gigacode/
+_avast_/
+
+# --- Сборка frontend ---
+node_modules/
+dist/
+coverage/
+.svelte-kit/
+.next/
+
+# --- Состояние и архивы: не код ---
+# PostgreSQL (bind-mount из compose) и дампы базы
+/data/
+# книги, ноутбуки, старый код — всё, что перенесено из project/
+/learning/
+# исторический аудит песочницы, к сервисам не относится
+/CODE_REVIEW.md
+*.log
+
+# --- Мусор ОС ---
+Thumbs.db
+desktop.ini
+.DS_Store
