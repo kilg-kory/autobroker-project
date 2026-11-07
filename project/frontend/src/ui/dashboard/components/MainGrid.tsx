@@ -8,6 +8,7 @@ import StatCard from './StatCard';
 import CandleChartCard from '../../../features/candles/CandleChartCard';
 import SignalsCard from '../../../features/analysis/SignalsCard';
 import PerformanceCard from '../../../features/analysis/PerformanceCard';
+import ErrorBoundary from '../../errors/ErrorBoundary';
 import { buildStats } from '../../../features/candles/stats';
 import { toDataPoints } from '../../../features/candles/toDataPoints';
 import { useGetAllCandlesQuery, useGetAnalysisQuery } from '../../../api/investorApi';
@@ -67,28 +68,34 @@ export default function MainGrid() {
             ))}
 
         <Grid size={{ xs: 12, lg: 8 }}>
-          <CandleChartCard
-            points={points}
-            signals={analysis?.signals}
-            indicators={analysis?.indicators}
-            loading={isLoading}
-          />
+          <ErrorBoundary title="График не отрисовался">
+            <CandleChartCard
+              points={points}
+              signals={analysis?.signals}
+              indicators={analysis?.indicators}
+              loading={isLoading}
+            />
+          </ErrorBoundary>
         </Grid>
 
         <Grid size={{ xs: 12, lg: 4 }}>
-          <SignalsCard
-            signals={analysis?.signals ?? []}
-            patterns={analysis?.patterns ?? []}
-            loading={isAnalysisLoading}
-          />
+          <ErrorBoundary title="Список сигналов не отрисовался">
+            <SignalsCard
+              signals={analysis?.signals ?? []}
+              patterns={analysis?.patterns ?? []}
+              loading={isAnalysisLoading}
+            />
+          </ErrorBoundary>
         </Grid>
 
         <Grid size={{ xs: 12 }}>
-          <PerformanceCard
-            instrumentId={QUERY.instrumentId}
-            interval={QUERY.interval}
-            days={QUERY.days}
-          />
+          <ErrorBoundary title="Таблица производительности не отрисовалась">
+            <PerformanceCard
+              instrumentId={QUERY.instrumentId}
+              interval={QUERY.interval}
+              days={QUERY.days}
+            />
+          </ErrorBoundary>
         </Grid>
       </Grid>
     </Box>

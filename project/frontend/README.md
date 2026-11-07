@@ -64,10 +64,13 @@ src/
                       и аналитика: IndicatorSeries, SignalPoint, AnalysisResponse
     quotation.ts      units + nano <-> number
     investorApi.ts    RTK Query: getAllCandles -> GET /api/candles,
-                                 getAnalysis   -> GET /api/analysis
+                                 getAnalysis   -> GET /api/analysis,
+                                 getPerformance -> GET /api/performance
   store/
     store.ts          configureStore + middleware RTK Query
     hooks.ts          типизированные useAppDispatch/useAppSelector
+  hooks/
+    useDebouncedValue.ts  значение с задержкой: пачка кликов -> один запрос
   features/candles/
     toDataPoints.ts   HistoricCandle[] -> DataPoint[] для графика
     stats.ts          метрики для карточек сверху
@@ -78,9 +81,20 @@ src/
     PerformanceCard.tsx  бэктест паттернов с галочками и пересчётом
   ui/
     dashboard/        шаблон MUI Dashboard (AppNavbar, SideMenu, Header, MainGrid, StatCard…)
+    errors/ErrorBoundary.tsx  перехват ошибок рендера: падает карточка, не страница
     shared-theme/     тема MUI и переключатель светлой/тёмной схемы из шаблона
   main.tsx            Provider + Dashboard
 ```
+
+### Ошибки и отзывчивость
+
+- Каждая карточка (`график`, `сигналы`, `производительность`) обёрнута в
+  `ErrorBoundary`, плюс ещё одна граница вокруг всего `MainGrid`. Падение
+  рендера показывает сообщение с кнопкой «Повторить» на месте блока, а не
+  белый экран на всю страницу.
+- Выбор паттернов в таблице производительности дебаунсится на 400 мс
+  (`useDebouncedValue`): при быстром перещёлкивании уходит один запрос с
+  итоговым набором, а не запрос на клик.
 
 ## Откуда взялся шаблон и что в нём изменено
 

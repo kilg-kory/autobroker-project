@@ -19,6 +19,7 @@ import Typography from '@mui/material/Typography';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import type { CandleInterval, PerformanceRow, PerformanceTotal } from '../../api/types';
 import { useGetPerformanceQuery } from '../../api/investorApi';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 
 type PerformanceCardProps = {
   instrumentId: string;
@@ -142,10 +143,16 @@ function RiskRewardHint() {
  * Метрики повторяют `project/investor/util/performance.py`: вход по открытию
  * бара сигнала, выход по открытию следующего сигнала, без комиссий.
  *
- * Галочки — единственное управление: изменение сразу уходит на сервер
+ * Галочки — единственное управление: изменение уходит на сервер
  * (`patterns=id1,id2`), и таблица с итогом пересчитываются под новый набор.
  * Чекбокс в шапке отмечает и снимает все паттерны.
+ *
+ * Выбор дебаунсится на `SELECTION_DEBOUNCE_MS`: при быстром перещёлкивании
+ * нескольких галочек уходит один запрос с итоговым набором, а не по запросу
+ * на клик (на сервере такой пересчёт стоит сотни миллисекунд).
  */
+const SELECTION_DEBOUNCE_MS = 400;
+
 export default function PerformanceCard({
   instrumentId,
   interval,
@@ -153,12 +160,13 @@ export default function PerformanceCard({
 }: PerformanceCardProps) {
   // selected === null значит «ещё не трогали»: отмечаем всё, что есть в ответе
   const [selected, setSelected] = useState<string[] | null>(null);
+  const debouncedSelection = useDebouncedValue(selected, SELECTION_DEBOUNCE_MS);
 
   const { data, isFetching, isError } = useGetPerformanceQuery({
     instrumentId,
     interval,
     days,
-    patterns: selected ?? undefined,
+    patterns: debouncedSelection ?? undefined,
   });
 
   const available = useMemo(() => data?.available ?? [], [data]);

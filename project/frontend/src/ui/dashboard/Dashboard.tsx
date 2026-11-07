@@ -7,6 +7,7 @@ import Header from './components/Header';
 import MainGrid from './components/MainGrid';
 import SideMenu from './components/SideMenu';
 import Copyright from './internals/components/Copyright';
+import ErrorBoundary from '../errors/ErrorBoundary';
 import AppTheme from '../shared-theme/AppTheme';
 
 export default function Dashboard(props: { disableCustomTheme?: boolean }) {
@@ -45,7 +46,11 @@ export default function Dashboard(props: { disableCustomTheme?: boolean }) {
             }}
           >
             <Header />
-            <MainGrid />
+            {/* Последняя линия обороны: у карточек свои границы, эта ловит
+                ошибку, если сломается что-то вокруг них. */}
+            <ErrorBoundary title="Дашборд не отрисовался">
+              <MainGrid />
+            </ErrorBoundary>
           </Stack>
           <Copyright sx={{ py: 2 }} />
         </Box>
