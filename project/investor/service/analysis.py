@@ -32,6 +32,13 @@ logger = logging.getLogger("investor.analysis")
 OPEN, HIGH, LOW, CLOSE, BUY, SELL, ATR = range(7)
 MATRIX_COLUMNS = 7
 
+# Сколько баров истории нужно самому «дальнему» паттерну: `base_signal`
+# смотрит на `i - 21`. Столько же строк заполнителя добавляется сверху матрицы,
+# чтобы паттерны не читали будущее через отрицательные индексы numpy.
+# Новый паттерн с бо́льшим lookback требует увеличить константу — это проверяет
+# check_project.py, сверяя её с реальными смещениями в signals/.
+LOOKBACK_BARS = 21
+
 NANO = 1_000_000_000
 
 
@@ -205,25 +212,47 @@ PATTERNS: tuple[Pattern, ...] = (
 
 
 def build_matrix(candles: list[dict[str, Any]]) -> np.ndarray:
-    """Свечи -> матрица [open, high, low, close, buy, sell, atr]."""
-    matrix = np.zeros((len(candles), MATRIX_COLUMNS), dtype=float)
-    for row, candle in enumerate(candles):
+    """Свечи -> матрица [open, high, low, close, buy, sell, atr].
+
+    Сверху добавляется `LOOKBACK_BARS` строк заполнителя из NaN. Это не
+    косметика: паттерны из книги обращаются к `data[i - 21]` и рассчитывали на
+    IndexError, а numpy молча заворачивает отрицательный индекс на конец
+    массива — то есть читает будущее. С NaN-строками «текущий» бар прогрева сам
+    по себе NaN, любое сравнение с ним даёт False, и паттерн ничего не пишет.
+    Нет истории — нет сигнала; сигналы на строках заполнителя отбрасываются.
+    """
+    rows = len(candles) + LOOKBACK_BARS
+    matrix = np.full((rows, MATRIX_COLUMNS), np.nan, dtype=float)
+
+    # колонки отметок — нули, иначе `data[i, buy] == 0` в паттернах не сработает
+    matrix[:, BUY] = 0.0
+    matrix[:, SELL] = 0.0
+
+    for index, candle in enumerate(candles):
+        row = LOOKBACK_BARS + index
         matrix[row, OPEN] = to_float(candle["open"])
         matrix[row, HIGH] = to_float(candle["high"])
         matrix[row, LOW] = to_float(candle["low"])
         matrix[row, CLOSE] = to_float(candle["close"])
-    matrix[:, ATR] = _atr_column(matrix)
+
+    real = matrix[LOOKBACK_BARS:]
+    real[:, ATR] = _atr_column(real)
     return matrix
 
 
 def _atr_column(matrix: np.ndarray) -> list[float]:
-    """ATR заполняется нулями там, где истории мало — так его ждут паттерны."""
+    """ATR; на прогреве — NaN, а не 0.
+
+    Ноль был ошибкой: `double_trouble` проверяет `high - low > 2 * atr`, и на
+    нулевом ATR условие проходит для любой свечи. NaN даёт False, и паттерн
+    молчит, пока не наберётся период.
+    """
     values = atr(
         list(matrix[:, HIGH]),
         list(matrix[:, LOW]),
         list(matrix[:, CLOSE]),
     )
-    return [0.0 if value is None else value for value in values]
+    return [float("nan") if value is None else value for value in values]
 
 
 def run_pattern(pattern: Pattern, matrix: np.ndarray) -> np.ndarray:
@@ -258,11 +287,13 @@ def detect_signals(
             continue
 
         count = 0
-        for row in range(min(len(data), len(candles))):
+        # строки заполнителя не считаем: там нет ни одной завершённой истории
+        for row in range(LOOKBACK_BARS, min(len(data), len(candles) + LOOKBACK_BARS)):
+            candle_index = row - LOOKBACK_BARS
             for column, direction in ((BUY, "buy"), (SELL, "sell")):
                 if not data[row, column]:
                     continue
-                candle = candles[row]
+                candle = candles[candle_index]
                 signals.append(
                     {
                         "time": candle["time"],

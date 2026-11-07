@@ -3,6 +3,7 @@
 Секции:
   signals    - каждый модуль signals/ вызывается на синтетических OHLC
   indicators - ma, smoothed_ma, rsi, atr
+  lookback   - LOOKBACK_BARS покрывает самый дальний взгляд паттернов
   services   - импорт market.candles, service.analysis, service.performance
   api        - реальные запросы к FastAPI через тестовый клиент
 
@@ -22,6 +23,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import pkgutil
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -153,6 +155,36 @@ def check_indicators() -> None:
             fail(f"indicators.{name}", exc)
 
 
+def check_lookback() -> None:
+    """Прогрев матрицы должен покрывать самый «дальний» паттерн.
+
+    analysis.py добавляет сверху LOOKBACK_BARS строк заполнителя, чтобы
+    паттерны не читали будущее через отрицательные индексы numpy. Если новый
+    паттерн смотрит дальше, чем заполнитель, look-ahead вернётся молча — поэтому
+    сверяем константу с реальными смещениями `i - N` в signals/.
+    """
+    from service.analysis import LOOKBACK_BARS
+
+    worst = 0
+    who = "-"
+    for path in sorted((INVESTOR / "signals").glob("*.py")):
+        offsets = [
+            int(match.group(1))
+            for match in re.finditer(r"i\s*-\s*(\d+)", path.read_text(encoding="utf-8"))
+        ]
+        if offsets and max(offsets) > worst:
+            worst = max(offsets)
+            who = path.name
+
+    if worst <= LOOKBACK_BARS:
+        ok("lookback", f" максимум {worst} баров ({who}) <= LOOKBACK_BARS={LOOKBACK_BARS}")
+    else:
+        fail(
+            "lookback",
+            f"{who} смотрит на {worst} баров назад, а LOOKBACK_BARS={LOOKBACK_BARS}",
+        )
+
+
 def check_services() -> None:
     """Импорт боевых модулей: ловит битые импорты, но не требует поднятой БД."""
     for name in (
@@ -202,6 +234,7 @@ def main() -> None:
     for title, check in (
         ("signals", check_signals),
         ("indicators", check_indicators),
+        ("lookback (прогрев окна)", check_lookback),
         ("services (import only)", check_services),
         ("api (fastapi)", check_fastapi),
     ):
