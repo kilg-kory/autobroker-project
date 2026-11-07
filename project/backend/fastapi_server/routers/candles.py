@@ -35,7 +35,7 @@ def read_candles(
 ) -> list[HistoricCandle]:
     """Свечи из сервиса investor. Ответ кэшируется на CACHE_TTL_SECONDS.
 
-    Заголовки: X-Cache (HIT/MISS), X-Cache-TTL, X-Data-Source (tinvest/mock).
+    Заголовки: X-Cache (HIT/MISS), X-Cache-TTL, X-Data-Source (postgres).
     """
     key = (instrument_id, interval, days)
     payload = _cache.get(key)

@@ -67,9 +67,10 @@ pip install -r investor\requirements.txt -r backend\requirements.txt
 pnpm dev
 ```
 
-Для реальных данных вместо мока нужен ещё SDK T-Invest — он ставится не из PyPI,
-команда есть в [investor/README.md](investor/README.md#docker). Без него investor
-работает: если `TOKEN` не задан, отдаёт детерминированный мок того же формата.
+Для реальных данных нужен SDK T-Invest — он ставится не из PyPI, команда есть в
+[investor/README.md](investor/README.md#docker). Моков нет: без `TOKEN` (или при
+ошибке API) investor не подставляет синтетику, а отдаёт то, что уже лежит в базе.
+Для тестов данные можно загрузить в PostgreSQL вручную.
 
 ## Docker
 

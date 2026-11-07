@@ -165,19 +165,18 @@ python scripts/make-icons.py
 ```
 React (RTK Query) ──GET /api/candles──▶ FastAPI (кэш 5 с) ──HTTP──▶ investor
                                             │                            │
-                                     X-Cache: HIT/MISS            T-Invest API
-                                                                       или мок
+                                     X-Cache: HIT/MISS            PostgreSQL
 ```
 
 - `src/api/investorApi.ts` — `fetchBaseQuery({ baseUrl: '/api' })`, эндпоинт `getAllCandles`.
 - `vite.config.ts` — прокси снимает префикс `/api` и отправляет запрос на
   `http://127.0.0.1:8000`, поэтому в dev всё на одном origin и CORS не нужен.
 - backend кэширует ответ на 5 секунд и сообщает состояние заголовками
-  `X-Cache: HIT|MISS`, `X-Cache-TTL`, `X-Data-Source: tinvest|postgres|mock`.
+  `X-Cache: HIT|MISS`, `X-Cache-TTL`, `X-Data-Source: postgres`.
 - investor — отдельный сервис на своём порту: обновляет данные по расписанию сам,
   backend знает о нём только адрес (`INVESTOR_API_URL`).
-- источник данных выбирает investor: T-Invest API, если в корневом `.env` есть `TOKEN`,
-  иначе (или при ошибке API) — детерминированный мок того же формата.
+- investor читает свою базу; в T-Invest ходит только его фоновый цикл. Моков нет:
+  если токена нет или API недоступен, отдаётся то, что уже сохранено.
 
 Форма ответа — `HistoricCandle` из `t_tech.invest`: цены как `Quotation { units, nano }`,
 время в ISO, флаг `isComplete`. `toDataPoints` переводит её в формат графика.

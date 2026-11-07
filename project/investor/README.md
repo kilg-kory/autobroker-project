@@ -14,7 +14,8 @@
 
 Окружение `project/.venv` создаётся один раз — см. «Запуск локально» в
 [../README.md](../README.md). Реальные данные требуют SDK T-Invest (команда ниже,
-в разделе «Docker»); без него сервис отдаёт мок, если `TOKEN` не задан.
+в разделе «Docker»). Моков нет: без `TOKEN` сервис просто не ходит в API и отдаёт
+то, что уже лежит в PostgreSQL.
 
 Обычно поднимается через `project/compose.yaml` — там Postgres уже настроен.
 
@@ -25,7 +26,7 @@
 ## Как устроено
 
 ```
-market/candles.py        источник: T-Invest API (таймаут на вызов — TINVEST_TIMEOUT_SECONDS), мок только без токена
+market/candles.py        источник: T-Invest API (таймаут на вызов — TINVEST_TIMEOUT_SECONDS), без токена — пустой ответ
 service/storage.py       PostgreSQL: таблица candles, upsert, выборка по окну
 service/store.py         чтение из БД + план докачки, который исполняет фоновый цикл
 service/analysis.py      индикаторы и разметка сигналов по свечам
@@ -78,8 +79,9 @@ BBG004730N88/CANDLE_INTERVAL_HOUR: в БД 575 свечей, докачано 1 
 ```
 
 Откуда в базе данные — видно в `/health` (поле `source` по каждому ключу:
-`tinvest`, `mock`, `mixed`). В ответе `/candles` заголовок `X-Data-Source`
-всегда `postgres`: с точки зрения запроса данные пришли из базы, а не из API.
+`tinvest`, `mixed`, `no_token` или `error`). В ответе `/candles` заголовок
+`X-Data-Source` всегда `postgres`: с точки зрения запроса данные пришли из базы,
+а не из API.
 
 ### Таблица `candles`
 
@@ -106,7 +108,7 @@ BBG004730N88/CANDLE_INTERVAL_HOUR: в БД 575 свечей, докачано 1 
 | `WARMUP_INSTRUMENTS` | `BBG004730N88` | что прогреть на старте (через запятую) |
 | `WARMUP_INTERVALS` | `CANDLE_INTERVAL_HOUR` | интервалы прогрева |
 | `WARMUP_DAYS` | `30` | глубина прогрева |
-| `TOKEN` | — | токен T-Invest; без него сервис отдаёт мок |
+| `TOKEN` | — | токен T-Invest; без него обновление не ходит в API |
 | `TINVEST_TIMEOUT_SECONDS` | `120` | таймаут одного gRPC-вызова к T-Invest (внутри SDK, по deadline) |
 
 Токен берётся из окружения (в compose — из корневого `.env`) либо из ближайшего
@@ -118,8 +120,8 @@ BBG004730N88/CANDLE_INTERVAL_HOUR: в БД 575 свечей, докачано 1 
 
 Ответ — массив `HistoricCandle`: цены как `Quotation { units, nano }`, время ISO 8601,
 флаг `isComplete`. Заголовки: `X-Data-Source` (всегда `postgres` — запрос читает
-базу), `X-Candles-Count`. Происхождение данных в базе (`tinvest` | `mock` |
-`mixed`) отдаёт `/health`.
+базу), `X-Candles-Count`. Происхождение данных в базе (`tinvest` | `mixed` |
+`no_token` | `error`) отдаёт `/health`.
 
 `GET /health` — `{status, refresh_interval_seconds, refreshes, errors, last_error,
 last_fetched, last_source, keys, snapshots}`.

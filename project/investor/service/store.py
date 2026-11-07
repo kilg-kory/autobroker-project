@@ -104,7 +104,7 @@ class Store:
     last_error: str | None = None
     last_fetched: int = 0
     last_source: str = "-"
-    #: чем наполнен ключ: tinvest, mock или error (пустой — ещё не наполняли)
+    #: чем наполнен ключ: tinvest, mixed, no_token, error (пустой — не наполняли)
     sources: dict[Key, str] = field(default_factory=dict)
     _wake: asyncio.Event = field(default_factory=asyncio.Event)
     _filled: dict[Key, asyncio.Event] = field(default_factory=dict)

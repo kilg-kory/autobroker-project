@@ -1,7 +1,11 @@
-"""Источник свечей: T-Invest API, при недоступности — детерминированный мок.
+"""Источник свечей — только T-Invest API. Моков нет.
 
 Модуль умеет ровно одно: отдать свечи за интервал [from_, to]. Про базу и
 про то, что уже сохранено, он не знает — это забота service/store.py.
+
+Если токена нет или API не ответил, возвращается пустой результат: сервис
+отдаёт то, что уже лежит в PostgreSQL, а синтетику в реальные данные не
+подставляет. Для тестов данные можно загрузить в базу вручную.
 
 Формат — HistoricCandle из t_tech.invest:
 
@@ -19,11 +23,9 @@
 from __future__ import annotations
 
 import logging
-import math
 import os
-import random
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -47,14 +49,12 @@ if _ENV_FILE is not None:
     load_dotenv(_ENV_FILE)
 
 DEFAULT_INSTRUMENT = "BBG004730N88"  # Сбербанк, как в tryTAPI.ipynb
-NANO = 1_000_000_000
 
 # Таймаут одного gRPC-вызова к T-Invest. Ставится интерсептором SDK на сам
 # вызов, поэтому SDK действительно прерывает запрос по deadline.
 # Значение большое намеренно: история за длинный период выкачивается страницами,
 # и каждая страница — отдельный unary-вызов, который может идти долго.
 TINVEST_TIMEOUT_SECONDS = float(os.getenv("TINVEST_TIMEOUT_SECONDS", "120"))
-MAX_CANDLES = 5_000
 
 STEP_BY_INTERVAL = {
     "CANDLE_INTERVAL_MIN_15": timedelta(minutes=15),
@@ -66,7 +66,7 @@ STEP_BY_INTERVAL = {
 @dataclass(frozen=True)
 class CandlesResult:
     candles: list[dict[str, Any]]
-    source: str  # "tinvest" | "mock"
+    source: str  # "tinvest" | "no_token" | "error"
 
 
 def step_for(interval: str) -> timedelta:
@@ -88,12 +88,11 @@ def fetch_range(
     from_: datetime,
     to: datetime,
 ) -> CandlesResult:
-    """Свечи за [from_, to].
+    """Свечи за [from_, to] из T-Invest.
 
-    Мок используется только если токена нет вовсе (локальная разработка).
-    Если токен есть, но API ответил ошибкой — возвращаем пустой результат:
-    подставлять синтетику в реальные данные нельзя, а то, что уже в базе,
-    сервис отдаст и так.
+    Пустой результат — нормальный ответ: нет токена или API не ответил, значит
+    новых данных нет. Синтетику не подставляем, сервис отдаст то, что уже
+    лежит в PostgreSQL.
 
     Таймаут живёт в интерсепторе клиента SDK (`TINVEST_TIMEOUT_SECONDS`),
     а не вокруг вызова: gRPC по deadline сам отменяет запрос, поэтому
@@ -101,8 +100,8 @@ def fetch_range(
     """
     token = os.getenv("TOKEN")
     if not token:
-        logger.info("investor: TOKEN не задан, отдаю мок")
-        return CandlesResult(_mock_range(interval, from_, to), "mock")
+        logger.warning("investor: TOKEN не задан, свечи не запрашиваются")
+        return CandlesResult([], "no_token")
 
     try:
         candles = _from_tinvest(token, instrument_id, interval, from_, to)
@@ -167,50 +166,3 @@ def _from_tinvest(
 
 def _quotation_of(value: Any) -> dict[str, int]:
     return {"units": int(value.units), "nano": int(value.nano)}
-
-
-def _to_quotation(price: float) -> dict[str, int]:
-    units = int(price)
-    return {"units": units, "nano": round((price - units) * NANO)}
-
-
-def _is_trading_hour(moment: datetime, step: timedelta) -> bool:
-    """Основная сессия MOEX: будни 10:00–18:59 MSK (07:00–15:59 UTC)."""
-    if step >= timedelta(days=1):
-        return True
-    return 1 <= moment.isoweekday() <= 5 and 7 <= moment.hour <= 14
-
-
-def _mock_candle(moment: datetime) -> dict[str, Any]:
-    """Детерминированная свеча: зависит только от времени, поэтому диапазоны
-    можно запрашивать по частям и получать согласованный ряд."""
-    stamp = int(moment.timestamp())
-    rng = random.Random(stamp)
-    price = 300 + 20 * math.sin(stamp / 86_400 * 0.7)
-    open_price = price * (1 + (rng.random() - 0.5) * 0.002)
-    close_price = price
-    wick = price * (0.0005 + rng.random() * 0.0015)
-    high_price = max(open_price, close_price) + wick * rng.random()
-    low_price = min(open_price, close_price) - wick * rng.random()
-    volume = round(5_000 + rng.random() * 95_000)
-
-    return {
-        "open": _to_quotation(open_price),
-        "high": _to_quotation(high_price),
-        "low": _to_quotation(low_price),
-        "close": _to_quotation(close_price),
-        "volume": volume,
-        "time": moment,
-        "isComplete": True,
-    }
-
-
-def _mock_range(interval: str, from_: datetime, to: datetime) -> list[dict[str, Any]]:
-    step = step_for(interval)
-    cursor = align(from_, step)
-    candles: list[dict[str, Any]] = []
-    while cursor <= to and len(candles) < MAX_CANDLES:
-        if _is_trading_hour(cursor, step):
-            candles.append(_mock_candle(cursor))
-        cursor += step
-    return candles

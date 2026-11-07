@@ -11,8 +11,8 @@ import type {
 /**
  * REST-клиент backend: GET /api/candles.
  *
- * Цепочка: frontend -> backend (FastAPI, TTL-кэш 5 с) -> investor (T-Invest API
- * или мок) -> обратно. Префикс /api снимает прокси Vite (vite.config.ts),
+ * Цепочка: frontend -> backend (FastAPI, TTL-кэш 5 с) -> investor (PostgreSQL;
+ * в T-Invest ходит только его фоновый цикл) -> обратно. Префикс /api снимает прокси Vite (vite.config.ts),
  * поэтому в dev запросы идут на тот же origin и CORS не нужен.
  */
 export const investorApi = createApi({
